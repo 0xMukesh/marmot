@@ -103,5 +103,6 @@ let%test _ =
     then true
     else failwith ("failed to decode opcodes: " ^ String.concat ", " failed)
   in
-  checker base_cases && checker mode_cases && checker lit_cases
+  let tests = [ base_cases; mode_cases; lit_cases ] in
+  List.fold_left (fun acc v -> checker v && acc) true tests
 ;;

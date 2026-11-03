@@ -1,2 +1,10 @@
 (library
- (name marmot))
+ (name uxn)
+ (inline_tests)
+ (preprocess
+  (pps
+    ppx_deriving.show
+    ppx_deriving.enum
+    ppx_deriving.make
+    ppx_enumerate
+    ppx_inline_test)))

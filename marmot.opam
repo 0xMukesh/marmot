@@ -14,6 +14,7 @@ depends: [
   "ocaml"
   "ocaml-lsp-server"
   "ocamlformat"
+  "ppx_deriving"
   "odoc" {with-doc}
 ]
 build: [

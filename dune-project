@@ -22,6 +22,7 @@
  (depends
   ocaml
   ocaml-lsp-server
-  ocamlformat)
+  ocamlformat
+  ppx_deriving)
  (tags
   ("uxn", "varvara")))

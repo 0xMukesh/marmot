@@ -1,6 +1,12 @@
 type t = int array
 
 let make ~n = Array.init n (fun _ -> 0)
-let at m i = m.(i)
-let peek_byte m pc = m.(pc + 1)
-let peek_short m pc = Utils.read_short m.(pc + 1) m.(pc + 2)
+let read_byte m i = m.(i)
+let read_short m i = Utils.read_short m.(i + 1) m.(i)
+let set_byte m i v = m.(i) <- v
+
+let set_short m i v =
+  let hi, lo = Utils.split_short v in
+  m.(i) <- lo;
+  m.(i + 1) <- hi
+;;

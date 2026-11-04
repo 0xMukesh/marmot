@@ -2,7 +2,7 @@
 
 An emulator for [Uxn](https://100r.co/site/uxn.html) virtual machine, written in OCaml
 
-### References
+## References
 
 - https://wiki.xxiivv.com/site/uxntal_opcodes.html
 - https://wiki.xxiivv.com/etc/uxnmin.c.txt

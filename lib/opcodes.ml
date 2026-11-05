@@ -43,7 +43,7 @@ type t =
   ; return : bool
   ; keep : bool
   }
-[@@deriving make]
+[@@deriving show { with_path = false }, make]
 
 let show t =
   let suffixes =

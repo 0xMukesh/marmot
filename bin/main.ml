@@ -19,13 +19,13 @@ let run argv =
   let speclist =
     [ ("--rom", Arg.Set_string rom, "<path> Path of the ROM file") ] |> Arg.align
   in
-  let input = ref [] in
-  let collect_input arg = input := arg :: !input in
-  Arg.parse_argv argv speclist collect_input usage_msg;
+  let stdin_args = ref [] in
+  let collect_args arg = stdin_args := arg :: !stdin_args in
+  Arg.parse_argv argv speclist collect_args usage_msg;
   if !rom = "" then raise @@ Arg.Bad "missing required argument: --rom";
   let program = read_rom_file !rom in
-  let machine = Uxn.init_machine program in
-  Uxn.run machine
+  let machine = Uxn.make_machine program in
+  Uxn.run machine (List.rev !stdin_args)
 ;;
 
 let () =

@@ -6,11 +6,18 @@ type machine =
   ; ret_stack : Stack.t
   }
 
+type step_ctx =
+  { stack : Stack.t
+  ; pop : unit -> int
+  ; push : int -> unit
+  ; restore : unit -> unit
+  }
+
 type step_result =
   | Continue
   | Break
 
-let init_machine program =
+let make_machine program =
   let m =
     { pc = 0x100
     ; memory = Memory.make ~n:0x10_000
@@ -19,24 +26,35 @@ let init_machine program =
     ; ret_stack = Stack.make ~size:0x100
     }
   in
-  Array.blit program 0 m.memory m.pc (Array.length program);
+  Array.blit program 0 m.memory.data m.pc (Array.length program);
   m
+;;
+
+let make_ctx (opcode : Opcodes.t) stack =
+  let saved = Stack.get_ptr stack in
+  { stack
+  ; pop = (fun () -> if opcode.short then Stack.pop_short stack else Stack.pop_byte stack)
+  ; push =
+      (fun v -> if opcode.short then Stack.push_short stack v else Stack.push_byte stack v)
+  ; restore = (fun () -> if opcode.keep then Stack.set_ptr stack saved)
+  }
 ;;
 
 let console_vector m = Memory.read_short m.device 0x10
 
-let handle_device_out port value =
-  let c = Char.chr (value land 0xff) in
+let handle_device_out m port value =
+  let port = port land 0xff in
+  let value = value land 0xff in
   match port with
   | 0x18 ->
     (* Console/write *)
-    print_char c;
+    print_char (Char.chr value);
     flush stdout
   | 0x19 ->
     (* Console/error *)
-    prerr_char c;
+    prerr_char (Char.chr value);
     flush stderr
-  | _ -> failwith (Printf.sprintf "cannot handle device out on 0x%02x port" port)
+  | _ -> Memory.set_byte m.device port value
 ;;
 
 let step m =
@@ -44,82 +62,79 @@ let step m =
   let opcode = Opcodes.decode byte in
   m.pc <- m.pc + 1;
 
-  let stack = if opcode.return then m.ret_stack else m.work_stack in
-  let stash_stack = if opcode.return then m.work_stack else m.ret_stack in
-  (* peek / pop / push a short or a byte from the stack depending on whether short mode is enabled or not *)
-  let peek_value () =
-    if opcode.short then Stack.peek_short stack else Stack.peek_byte stack
+  let work = make_ctx opcode m.work_stack in
+  let ret = make_ctx opcode m.ret_stack in
+  let src, dst = if opcode.return then (ret, work) else (work, ret) in
+
+  let mem_set_value mem addr value =
+    if opcode.short
+    then Memory.set_short mem addr value
+    else Memory.set_byte mem addr value
   in
-  let pop_value () =
-    if opcode.short then Stack.pop_short stack else Stack.pop_byte stack
+  let mem_read_value mem addr =
+    if opcode.short then Memory.read_short mem addr else Memory.read_byte mem addr
   in
-  let push_value value =
-    if opcode.short then Stack.push_short stack value else Stack.push_byte stack value
+  let jump_to addr =
+    let addr = if not opcode.short then Utils.to_signed_byte addr else addr in
+    m.pc <- (addr + if opcode.short then 0 else m.pc)
   in
-  (* read / set a short or a byte from / to the memory depending on whether short mode is enabled or not *)
-  let mem_read_value ?(mem = m.memory) i =
-    if opcode.short then Memory.read_short mem i else Memory.read_byte mem i
-  in
-  let mem_set_value ?(mem = m.memory) i value =
-    if opcode.short then Memory.set_short mem i value else Memory.set_byte mem i value
-  in
-  (* peek or pop value depending on whether keep mode is enabled or not *)
-  let peek_or_pop value = if opcode.keep then peek_value () else pop_value () in
-  (* pop N values out of the stack *)
-  let pop_discard ?(n = 1) () =
+  let pop_discard ctx n =
     let rec loop i =
       if i <= 0
       then ()
       else (
-        ignore (pop_value ());
+        ignore (ctx.pop ());
         loop (i - 1)
       )
     in
     loop n
   in
-  (* if short mode is enabled, jump using absolute address else relative offset *)
-  let jump addr =
-    if opcode.short
-    then m.pc <- addr land 0xffff
-    else m.pc <- (m.pc + Utils.to_signed_byte addr) land 0xffff
-  in
+
   if opcode.base = Opcodes.BRK
   then Break
   else (
     ( match opcode.base with
       | Opcodes.INC ->
-        let value = peek_or_pop () in
-        let mask = if opcode.short then 0xffff else 0xff in
-        push_value ((value + 1) land mask)
-      | Opcodes.POP -> if opcode.keep then () else pop_discard ()
+        let value = src.pop () in
+        src.restore ();
+        let result = value + 1 in
+        src.push result
+      | Opcodes.POP ->
+        pop_discard src 1;
+        src.restore ()
       | Opcodes.NIP ->
-        let value = peek_value () in
-        if not opcode.keep then pop_discard ~n:2 ();
-        push_value value
+        let b = src.pop () in
+        ignore (src.pop ());
+        src.restore ();
+        src.push b
       | Opcodes.SWP ->
-        let b = peek_or_pop () in
-        let a = peek_or_pop () in
-        push_value b;
-        push_value a
+        let b = src.pop () in
+        let a = src.pop () in
+        src.restore ();
+        src.push b;
+        src.push a
       | Opcodes.ROT ->
-        let c = peek_or_pop () in
-        let b = peek_or_pop () in
-        let a = peek_or_pop () in
-        push_value b;
-        push_value c;
-        push_value a
+        let c = src.pop () in
+        let b = src.pop () in
+        let a = src.pop () in
+        src.restore ();
+        src.push b;
+        src.push c;
+        src.push a
       | Opcodes.DUP ->
-        let value = peek_or_pop () in
-        push_value value;
-        push_value value
+        let a = src.pop () in
+        src.restore ();
+        src.push a;
+        src.push a
       | Opcodes.OVR ->
-        let b = peek_or_pop () in
-        let a = peek_or_pop () in
-        push_value a;
-        push_value b;
-        push_value a
+        let b = src.pop () in
+        let a = src.pop () in
+        src.restore ();
+        src.push a;
+        src.push b;
+        src.push a
       | Opcodes.EQU | Opcodes.NEQ | Opcodes.GTH | Opcodes.LTH ->
-        let f =
+        let compare =
           match opcode.base with
           | Opcodes.EQU -> ( = )
           | Opcodes.NEQ -> ( <> )
@@ -127,43 +142,52 @@ let step m =
           | Opcodes.LTH -> ( < )
           | _ -> assert false
         in
-        let b = peek_or_pop () in
-        let a = peek_or_pop () in
-        if f a b then push_value 1 else push_value 0
+        let b = src.pop () in
+        let a = src.pop () in
+        src.restore ();
+        Stack.push_byte src.stack (if compare a b then 1 else 0)
       | Opcodes.JMP ->
-        let addr = peek_or_pop () in
-        jump addr
+        let addr = src.pop () in
+        src.restore ();
+        jump_to addr
       | Opcodes.JCN ->
-        let addr = peek_or_pop () in
-        let condition = peek_or_pop () in
-        if condition <> 0 then jump addr
+        let addr = src.pop () in
+        let cond = Stack.pop_byte src.stack in
+        src.restore ();
+        if cond <> 0 then jump_to addr
       | Opcodes.JSR ->
-        let addr = peek_or_pop () in
-        Stack.push_short stash_stack m.pc;
-        jump addr
+        Stack.push_short dst.stack m.pc;
+        let addr = src.pop () in
+        src.restore ();
+        jump_to addr
       | Opcodes.STH ->
-        let value = peek_or_pop () in
-        Stack.push_short stash_stack value
+        let value = src.pop () in
+        src.restore ();
+        dst.push value
       | Opcodes.LDZ | Opcodes.LDR | Opcodes.LDA ->
         let addr =
           match opcode.base with
-          | Opcodes.LDZ -> Stack.pop_byte stack
-          | Opcodes.LDR -> m.pc + (Utils.to_signed_byte @@ Stack.pop_byte stack)
-          | Opcodes.LDA -> Stack.pop_short stack
+          | Opcodes.LDZ -> Stack.pop_byte src.stack land 0xff
+          | Opcodes.LDR ->
+            (m.pc + Utils.to_signed_byte (Stack.pop_byte src.stack)) land 0xffff
+          | Opcodes.LDA -> Stack.pop_short src.stack
           | _ -> assert false
         in
-        let value = mem_read_value addr in
-        push_value value
+        src.restore ();
+        let value = mem_read_value m.memory addr in
+        src.push value
       | Opcodes.STZ | Opcodes.STR | Opcodes.STA ->
         let addr =
           match opcode.base with
-          | Opcodes.STZ -> Stack.pop_byte stack
-          | Opcodes.STR -> m.pc + (Utils.to_signed_byte @@ Stack.pop_byte stack)
-          | Opcodes.STA -> Stack.pop_short stack
+          | Opcodes.STZ -> Stack.pop_byte src.stack land 0xff
+          | Opcodes.STR ->
+            (m.pc + Utils.to_signed_byte (Stack.pop_byte src.stack)) land 0xffff
+          | Opcodes.STA -> Stack.pop_short src.stack
           | _ -> assert false
         in
-        let value = pop_value () in
-        mem_set_value addr value
+        let value = src.pop () in
+        src.restore ();
+        mem_set_value m.memory addr value
       | Opcodes.ADD
       | Opcodes.SUB
       | Opcodes.MUL
@@ -182,51 +206,65 @@ let step m =
           | Opcodes.EOR -> ( lxor )
           | _ -> assert false
         in
-        let b = pop_value () in
-        let a = pop_value () in
-        push_value (f a b)
+        let b = src.pop () in
+        let a = src.pop () in
+        src.restore ();
+        let result = if opcode.base = Opcodes.DIV && b = 0 then 0 else f a b in
+        src.push result
       | Opcodes.SFT ->
-        let shift = Stack.pop_byte stack in
-        let value = pop_value () in
-        let bits_to_left = shift land 0xf in
-        let bits_to_right = (shift land 0xf0) lsr 4 in
-        let result = (value lsr bits_to_right) lsl bits_to_left in
-        push_value result
-      | Opcodes.DEI ->
-        let port = Stack.pop_byte stack in
-        let value = mem_read_value ~mem:m.device port in
-        push_value value
-      | Opcodes.DEO ->
-        let port = Stack.pop_byte stack in
-        let value = pop_value () in
-        mem_set_value ~mem:m.device port value;
-        handle_device_out port value
-      | Opcodes.JCI ->
-        let cond = Stack.pop_byte m.work_stack in
-        let offset = mem_read_value m.pc in
-        if cond <> 0 then m.pc <- m.pc + offset else m.pc <- m.pc + 2
-      | Opcodes.JMI ->
-        let offset = mem_read_value m.pc in
-        m.pc <- m.pc + offset
-      | Opcodes.JSI ->
+        let shift = Stack.pop_byte src.stack in
+        let a = src.pop () in
+        src.restore ();
+        let bits_to_right = shift land 0x0f in
+        let bits_to_left = (shift land 0xf0) lsr 4 in
+        let result = (a lsr bits_to_right) lsl bits_to_left in
+        src.push result
+      | Opcodes.JCI | Opcodes.JMI | Opcodes.JSI ->
         let offset = Memory.read_short m.memory m.pc in
-        Stack.push_short m.ret_stack (m.pc + 2);
-        m.pc <- m.pc + 2 + offset
+        let jump_imm () = m.pc <- (m.pc + 2 + offset) land 0xffff in
+        ( match opcode.base with
+          | Opcodes.JCI ->
+            let cond = Stack.pop_byte src.stack in
+            src.restore ();
+            if cond <> 0 then jump_imm () else m.pc <- m.pc + 2
+          | Opcodes.JMI -> jump_imm ()
+          | Opcodes.JSI ->
+            Stack.push_short m.ret_stack (m.pc + 2);
+            jump_imm ()
+          | _ -> assert false
+        )
       | Opcodes.LIT ->
-        push_value (mem_read_value m.pc);
+        let value = mem_read_value m.memory m.pc in
+        src.push value;
         if opcode.short then m.pc <- m.pc + 2 else m.pc <- m.pc + 1
+      | Opcodes.DEI ->
+        let port = Stack.pop_byte src.stack in
+        src.restore ();
+        let value = mem_read_value m.device port in
+        src.push value
+      | Opcodes.DEO ->
+        (* device port is always 8-bits *)
+        let port = Stack.pop_byte src.stack in
+        let value = src.pop () in
+        src.restore ();
+        mem_set_value m.device port value;
+        handle_device_out m port value
       | _ -> assert false
     );
     Continue
   )
 ;;
 
-let run m =
-  m.pc <- 0x100;
+let run_until_break m =
   let rec loop () =
     match step m with
     | Continue -> loop ()
     | Break -> ()
   in
   loop ()
+;;
+
+let run m args =
+  m.pc <- 0x100;
+  run_until_break m
 ;;

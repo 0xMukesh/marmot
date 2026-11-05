@@ -1,12 +1,2 @@
-|10 @Console/vector $2 &read $5 &type $1 &write $1 &error $1
-
-%EMIT { .Console/write DEO } ( character -- )
-%NL { #0a .Console/write DEO } ( -- )
-
-|0100
-    LIT "h EMIT
-    LIT "e EMIT
-    LIT "l EMIT
-    LIT "l EMIT
-    LIT "o EMIT
-    NL ( newline )
+|100
+    #6765 INC2 POP #18 DEO

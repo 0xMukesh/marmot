@@ -1,2 +1,11 @@
-|100
-    #6765 INC2 POP #18 DEO
+|00 @System/vector $2 &expansion $2 &wst $1 &rst $1 &metadata $2 &r $2 &g $2 &b $2 &debug $1 &state $1
+
+|100 @on-reset ( -> )
+	;meta .System/metadata DEO2
+	BRK
+
+@meta 00
+	"Nasu 0a
+	"A 20 "Sprite 20 "Editor 0a
+	"By 20 "Hundred 20 "Rabbits 0a
+	"Jan 20 "8, 20 "2023 $2

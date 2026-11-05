@@ -6,13 +6,6 @@ type machine =
   ; ret_stack : Stack.t
   }
 
-type step_ctx =
-  { stack : Stack.t
-  ; pop : unit -> int
-  ; push : int -> unit
-  ; restore : unit -> unit
-  }
-
 type step_result =
   | Continue
   | Break
@@ -30,22 +23,32 @@ let make_machine program =
   m
 ;;
 
-let make_ctx (opcode : Opcodes.t) stack =
-  let saved = Stack.get_ptr stack in
-  { stack
-  ; pop = (fun () -> if opcode.short then Stack.pop_short stack else Stack.pop_byte stack)
-  ; push =
-      (fun v -> if opcode.short then Stack.push_short stack v else Stack.push_byte stack v)
-  ; restore = (fun () -> if opcode.keep then Stack.set_ptr stack saved)
-  }
-;;
-
-let console_vector m = Memory.read_short m.device 0x10
-
 let handle_device_out m port value =
-  let port = port land 0xff in
-  let value = value land 0xff in
   match port with
+  | 0x00 -> () (* System/unused *)
+  | 0x06 ->
+    (* System/metadata *)
+    let start = value + 1 in
+    let buf = Buffer.create 64 in
+
+    let rec loop i =
+      let char = Memory.read_byte m.memory i in
+      if char = 0
+      then ()
+      else (
+        Buffer.add_int8 buf char;
+        loop (i + 1)
+      )
+    in
+    loop start;
+    print_endline (Bytes.to_string @@ Buffer.to_bytes buf)
+  | 0x0f ->
+    (* System/state *)
+    if value <> 0
+    then (
+      let code = value land 0x7f in
+      exit code
+    )
   | 0x18 ->
     (* Console/write *)
     print_char (Char.chr value);
@@ -54,7 +57,8 @@ let handle_device_out m port value =
     (* Console/error *)
     prerr_char (Char.chr value);
     flush stderr
-  | _ -> Memory.set_byte m.device port value
+  | 0xff -> () (* unused *)
+  | _ -> failwith (Printf.sprintf "device out is not yet implemented for 0x%02x" port)
 ;;
 
 let step m =
@@ -62,8 +66,8 @@ let step m =
   let opcode = Opcodes.decode byte in
   m.pc <- m.pc + 1;
 
-  let work = make_ctx opcode m.work_stack in
-  let ret = make_ctx opcode m.ret_stack in
+  let work = Stack.make_wrapper opcode m.work_stack in
+  let ret = Stack.make_wrapper opcode m.ret_stack in
   let src, dst = if opcode.return then (ret, work) else (work, ret) in
 
   let mem_set_value ?mask mem addr value =
@@ -80,7 +84,7 @@ let step m =
     let addr = if not opcode.short then Utils.to_signed_byte addr else addr in
     m.pc <- (addr + if opcode.short then 0 else m.pc)
   in
-  let pop_discard ctx n =
+  let pop_discard (ctx : Stack.wrapper) n =
     let rec loop i =
       if i <= 0
       then ()
@@ -173,6 +177,7 @@ let step m =
           || opcode.base = Opcodes.LDR
           || opcode.base = Opcodes.LDA
         in
+        let is_zero_page = opcode.base = Opcodes.LDZ || opcode.base = Opcodes.STZ in
         let addr =
           match opcode.base with
           | Opcodes.LDZ | Opcodes.STZ -> Stack.pop_byte src.stack
@@ -181,14 +186,8 @@ let step m =
           | Opcodes.LDA | Opcodes.STA -> Stack.pop_short src.stack
           | _ -> assert false
         in
-        let mask =
-          if opcode.base = Opcodes.LDZ || opcode.base = Opcodes.STZ
-          then Some 0xff
-          else None
-        in
-        let value =
-          if not is_load then src.pop () else mem_read_value ?mask m.memory addr
-        in
+        let mask = if is_zero_page then Some 0xff else None in
+        let value = if is_load then mem_read_value ?mask m.memory addr else src.pop () in
         src.restore ();
         if is_load then src.push value else mem_set_value ?mask m.memory addr value
       | Opcodes.ADD

@@ -26,7 +26,7 @@ let make_machine program =
     ; ret_stack = Stack.make ~size:0x100
     }
   in
-  Array.blit program 0 m.memory.data m.pc (Array.length program);
+  Array.blit program 0 (Memory.data m.memory) m.pc (Array.length program);
   m
 ;;
 
@@ -66,13 +66,15 @@ let step m =
   let ret = make_ctx opcode m.ret_stack in
   let src, dst = if opcode.return then (ret, work) else (work, ret) in
 
-  let mem_set_value mem addr value =
+  let mem_set_value ?mask mem addr value =
     if opcode.short
-    then Memory.set_short mem addr value
-    else Memory.set_byte mem addr value
+    then Memory.set_short ?mask mem addr value
+    else Memory.set_byte ?mask mem addr value
   in
-  let mem_read_value mem addr =
-    if opcode.short then Memory.read_short mem addr else Memory.read_byte mem addr
+  let mem_read_value ?mask mem addr =
+    if opcode.short
+    then Memory.read_short ?mask mem addr
+    else Memory.read_byte ?mask mem addr
   in
   let jump_to addr =
     let addr = if not opcode.short then Utils.to_signed_byte addr else addr in
@@ -164,30 +166,31 @@ let step m =
         let value = src.pop () in
         src.restore ();
         dst.push value
-      | Opcodes.LDZ | Opcodes.LDR | Opcodes.LDA ->
+      | Opcodes.LDZ | Opcodes.LDR | Opcodes.LDA | Opcodes.STZ | Opcodes.STR | Opcodes.STA
+        ->
+        let is_load =
+          opcode.base = Opcodes.LDZ
+          || opcode.base = Opcodes.LDR
+          || opcode.base = Opcodes.LDA
+        in
         let addr =
           match opcode.base with
-          | Opcodes.LDZ -> Stack.pop_byte src.stack land 0xff
-          | Opcodes.LDR ->
+          | Opcodes.LDZ | Opcodes.STZ -> Stack.pop_byte src.stack
+          | Opcodes.LDR | Opcodes.STR ->
             (m.pc + Utils.to_signed_byte (Stack.pop_byte src.stack)) land 0xffff
-          | Opcodes.LDA -> Stack.pop_short src.stack
+          | Opcodes.LDA | Opcodes.STA -> Stack.pop_short src.stack
           | _ -> assert false
         in
-        src.restore ();
-        let value = mem_read_value m.memory addr in
-        src.push value
-      | Opcodes.STZ | Opcodes.STR | Opcodes.STA ->
-        let addr =
-          match opcode.base with
-          | Opcodes.STZ -> Stack.pop_byte src.stack land 0xff
-          | Opcodes.STR ->
-            (m.pc + Utils.to_signed_byte (Stack.pop_byte src.stack)) land 0xffff
-          | Opcodes.STA -> Stack.pop_short src.stack
-          | _ -> assert false
+        let mask =
+          if opcode.base = Opcodes.LDZ || opcode.base = Opcodes.STZ
+          then Some 0xff
+          else None
         in
-        let value = src.pop () in
+        let value =
+          if not is_load then src.pop () else mem_read_value ?mask m.memory addr
+        in
         src.restore ();
-        mem_set_value m.memory addr value
+        if is_load then src.push value else mem_set_value ?mask m.memory addr value
       | Opcodes.ADD
       | Opcodes.SUB
       | Opcodes.MUL
@@ -243,7 +246,6 @@ let step m =
         let value = mem_read_value m.device port in
         src.push value
       | Opcodes.DEO ->
-        (* device port is always 8-bits *)
         let port = Stack.pop_byte src.stack in
         let value = src.pop () in
         src.restore ();

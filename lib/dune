@@ -1,6 +1,6 @@
 (library
  (name uxn)
- (inline_tests)
+ (libraries core devices)
  (preprocess
   (pps
     ppx_deriving.show

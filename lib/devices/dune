@@ -1,0 +1,8 @@
+(library
+ (name devices)
+ (wrapped false)
+ (libraries core)
+ (modules_without_implementation device_intf)
+ (preprocess
+  (pps
+    ppx_deriving.enum)))

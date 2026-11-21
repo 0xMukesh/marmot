@@ -1,55 +1,61 @@
 type machine =
   { mutable pc : int
   ; memory : Memory.t
-  ; device : Memory.t
+  ; devices : Devices.t
   ; work_stack : Stack.t
   ; ret_stack : Stack.t
   }
 
-type step_result =
-  | Continue
-  | Break
-
-let make_machine program =
+let make_machine (program : int array) =
+  let ram = Memory.make ~n:0x10_000 in
   let m =
     { pc = 0x100
-    ; memory = Memory.make ~n:0x10_000
-    ; device = Memory.make ~n:0x100
+    ; memory = ram
+    ; devices = Devices.make ~ram
     ; work_stack = Stack.make ~size:0x100
     ; ret_stack = Stack.make ~size:0x100
     }
   in
-  Array.blit program 0 (Memory.data m.memory) m.pc (Array.length program);
+  Memory.load ram program ~at:m.pc;
   m
 ;;
+
+type stack_wrapper =
+  { stack : Stack.t
+  ; pop : unit -> int
+  ; push : int -> unit
+  ; restore : unit -> unit
+  }
+
+let make_stack_wrapper (opcode : Opcodes.t) stack =
+  let saved = Stack.get_ptr stack in
+  { stack
+  ; pop = (fun () -> if opcode.short then Stack.pop_short stack else Stack.pop_byte stack)
+  ; push =
+      (fun v -> if opcode.short then Stack.push_short stack v else Stack.push_byte stack v)
+  ; restore = (fun () -> if opcode.keep then Stack.set_ptr stack saved)
+  }
+;;
+
+type step_result =
+  | Continue
+  | Break
 
 let step m =
   let byte = Memory.read_byte m.memory m.pc in
   let opcode = Opcodes.decode byte in
   m.pc <- m.pc + 1;
 
-  let work = Stack.make_wrapper opcode m.work_stack in
-  let ret = Stack.make_wrapper opcode m.ret_stack in
+  let work = make_stack_wrapper opcode m.work_stack in
+  let ret = make_stack_wrapper opcode m.ret_stack in
   let src, dst = if opcode.return then (ret, work) else (work, ret) in
-
-  let mem_set_value ?mask mem addr value =
-    if opcode.short
-    then Memory.set_short ?mask mem addr value
-    else Memory.set_byte ?mask mem addr value
-  in
-
-  let mem_read_value ?mask mem addr =
-    if opcode.short
-    then Memory.read_short ?mask mem addr
-    else Memory.read_byte ?mask mem addr
-  in
 
   let jump_to addr =
     let addr = if not opcode.short then Utils.to_signed_byte addr else addr in
     m.pc <- (addr + if opcode.short then 0 else m.pc)
   in
 
-  let pop_discard (ctx : Stack.wrapper) n =
+  let pop_discard (ctx : stack_wrapper) n =
     let rec loop i =
       if i <= 0
       then ()
@@ -152,9 +158,15 @@ let step m =
           | _ -> assert false
         in
         let mask = if is_zero_page then Some 0xff else None in
-        let value = if is_load then mem_read_value ?mask m.memory addr else src.pop () in
+        let value =
+          if is_load
+          then Memory.read ?mask m.memory addr ~short:opcode.short
+          else src.pop ()
+        in
         src.restore ();
-        if is_load then src.push value else mem_set_value ?mask m.memory addr value
+        if is_load
+        then src.push value
+        else Memory.write ?mask m.memory addr ~value ~short:opcode.short
       | Opcodes.ADD
       | Opcodes.SUB
       | Opcodes.MUL
@@ -201,20 +213,19 @@ let step m =
           | _ -> assert false
         )
       | Opcodes.LIT ->
-        let value = mem_read_value m.memory m.pc in
+        let value = Memory.read m.memory m.pc ~short:opcode.short in
         src.push value;
         if opcode.short then m.pc <- m.pc + 2 else m.pc <- m.pc + 1
       | Opcodes.DEI ->
         let port = Stack.pop_byte src.stack in
         src.restore ();
-        let value = mem_read_value m.device port in
+        let value = Devices.read m.devices ~port ~short:opcode.short in
         src.push value
       | Opcodes.DEO ->
         let port = Stack.pop_byte src.stack in
         let value = src.pop () in
         src.restore ();
-        mem_set_value m.device port value;
-        Devices.handle_out port value m.memory m.device
+        Devices.write m.devices ~port ~value ~short:opcode.short
       | _ -> assert false
     );
     Continue
@@ -231,25 +242,35 @@ let run_until_break m =
 ;;
 
 let rec process_args m args =
-  let console_input char input_type =
-    Memory.set_byte m.device 0x12 char;
-    Memory.set_byte m.device 0x17 input_type;
-    let console_vector = Memory.read_short m.device 0x10 in
-    m.pc <- console_vector;
-    run_until_break m
+  let feed_arg arg ~final =
+    String.iter
+      (fun c ->
+         Devices.push_input m.devices ~data:(Char.code c) ~kind:Devices.Console.Argument
+       )
+      arg;
+    Devices.push_input
+      m.devices
+      ~data:(Char.code '\n')
+      ~kind:(if final then Devices.Console.End else Devices.Console.ArgumentSpacer);
+    while Devices.prepare_input m.devices do
+      m.pc <- Devices.console_vector m.devices;
+      run_until_break m
+    done
   in
   match args with
   | hd :: tl ->
-    String.iter (fun c -> console_input (Char.code c) 0x2) hd;
-    console_input (Char.code '\n') (if tl = [] then 0x4 else 0x3);
+    feed_arg hd ~final:(tl = []);
     process_args m tl
   | [] -> ()
 ;;
 
 let run m args =
   m.pc <- 0x100;
-  List.iter print_endline args;
-  Memory.set_byte m.device 0x17 (if List.length args > 1 then 1 else 0);
+  Devices.write
+    m.devices
+    ~port:0x17
+    ~value:(if List.length args > 1 then 1 else 0)
+    ~short:false;
   run_until_break m;
   process_args m args
 ;;

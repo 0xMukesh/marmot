@@ -1,5 +1,5 @@
 type base_ops =
-  | BRK [@value 0x00]
+  | BRK
   | INC
   | POP
   | NIP

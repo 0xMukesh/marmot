@@ -6,7 +6,7 @@ type machine =
   ; ret_stack : Stack.t
   }
 
-let make_machine (program : int array) =
+let make (program : int array) =
   let ram = Memory.make ~n:0x10_000 in
   let m =
     { pc = 0x100

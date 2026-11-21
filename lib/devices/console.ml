@@ -12,10 +12,6 @@ type event =
 
 type t = { pending : event Queue.t }
 
-let stdin = 0x01
-let key_press = 0x02
-let end_of_line = 0x03
-let end_of_input = 0x04
 let create ~ram:_ = { pending = Queue.create () }
 let read _ ~port:_ ~current = current
 

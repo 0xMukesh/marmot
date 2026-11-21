@@ -27,7 +27,7 @@ let run argv =
   Arg.parse_argv ~current argv speclist collect_args usage_msg;
   if !rom = "" then raise @@ Arg.Bad "missing required argument: --rom";
   let program = read_rom_file !rom in
-  let machine = Uxn.make_machine program in
+  let machine = Uxn.make program in
   Uxn.run machine (List.rev !stdin_args)
 ;;
 

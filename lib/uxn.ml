@@ -23,44 +23,6 @@ let make_machine program =
   m
 ;;
 
-let handle_device_out m port value =
-  match port with
-  | 0x00 -> () (* System/unused *)
-  | 0x06 ->
-    (* System/metadata *)
-    let start = value + 1 in
-    let buf = Buffer.create 64 in
-
-    let rec loop i =
-      let char = Memory.read_byte m.memory i in
-      if char = 0
-      then ()
-      else (
-        Buffer.add_int8 buf char;
-        loop (i + 1)
-      )
-    in
-    loop start;
-    print_endline (Bytes.to_string @@ Buffer.to_bytes buf)
-  | 0x0f ->
-    (* System/state *)
-    if value <> 0
-    then (
-      let code = value land 0x7f in
-      exit code
-    )
-  | 0x18 ->
-    (* Console/write *)
-    print_char (Char.chr value);
-    flush stdout
-  | 0x19 ->
-    (* Console/error *)
-    prerr_char (Char.chr value);
-    flush stderr
-  | 0xff -> () (* unused *)
-  | _ -> failwith (Printf.sprintf "device out is not yet implemented for 0x%02x" port)
-;;
-
 let step m =
   let byte = Memory.read_byte m.memory m.pc in
   let opcode = Opcodes.decode byte in
@@ -75,15 +37,18 @@ let step m =
     then Memory.set_short ?mask mem addr value
     else Memory.set_byte ?mask mem addr value
   in
+
   let mem_read_value ?mask mem addr =
     if opcode.short
     then Memory.read_short ?mask mem addr
     else Memory.read_byte ?mask mem addr
   in
+
   let jump_to addr =
     let addr = if not opcode.short then Utils.to_signed_byte addr else addr in
     m.pc <- (addr + if opcode.short then 0 else m.pc)
   in
+
   let pop_discard (ctx : Stack.wrapper) n =
     let rec loop i =
       if i <= 0
@@ -249,7 +214,7 @@ let step m =
         let value = src.pop () in
         src.restore ();
         mem_set_value m.device port value;
-        handle_device_out m port value
+        Devices.handle_out port value m.memory m.device
       | _ -> assert false
     );
     Continue
@@ -265,7 +230,26 @@ let run_until_break m =
   loop ()
 ;;
 
+let rec process_args m args =
+  let console_input char input_type =
+    Memory.set_byte m.device 0x12 char;
+    Memory.set_byte m.device 0x17 input_type;
+    let console_vector = Memory.read_short m.device 0x10 in
+    m.pc <- console_vector;
+    run_until_break m
+  in
+  match args with
+  | hd :: tl ->
+    String.iter (fun c -> console_input (Char.code c) 0x2) hd;
+    console_input (Char.code '\n') (if tl = [] then 0x4 else 0x3);
+    process_args m tl
+  | [] -> ()
+;;
+
 let run m args =
   m.pc <- 0x100;
-  run_until_break m
+  List.iter print_endline args;
+  Memory.set_byte m.device 0x17 (if List.length args > 1 then 1 else 0);
+  run_until_break m;
+  process_args m args
 ;;

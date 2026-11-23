@@ -1,6 +1,6 @@
 (library
  (name uxn)
- (libraries core devices)
+ (libraries core)
  (preprocess
   (pps
     ppx_deriving.show

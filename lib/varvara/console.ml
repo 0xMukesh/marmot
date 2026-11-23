@@ -12,7 +12,7 @@ type event =
 
 type t = { pending : event Queue.t }
 
-let create ~ram:_ = { pending = Queue.create () }
+let make ~ram:_ = { pending = Queue.create () }
 let read _ ~port:_ ~current = current
 
 let write t ~port ~value =
@@ -35,8 +35,8 @@ let prepare t ~ports =
   then false
   else (
     let event = Queue.take t.pending in
-    Memory.write_byte ports 0x12 ~value:event.data;
-    Memory.write_byte ports 0x17 ~value:(input_type_to_enum event.kind);
+    Memory.write_byte ports ~at:0x12 ~value:event.data;
+    Memory.write_byte ports ~at:0x17 ~value:(input_type_to_enum event.kind);
     true
   )
 ;;

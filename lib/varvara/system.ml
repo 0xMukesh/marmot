@@ -1,7 +1,11 @@
 type t = { ram : Memory.t }
 
-let create ~ram = { ram }
-let read _ ~port:_ ~current = current
+let make ~ram = { ram }
+
+let read t ~port ~current =
+  match port with
+  | _ -> current
+;;
 
 let write t ~port ~value =
   match port with
@@ -9,7 +13,7 @@ let write t ~port ~value =
   | 0x06 ->
     let buf = Buffer.create 64 in
     let rec loop i =
-      let char = Memory.read_byte t.ram i in
+      let char = Memory.read_byte t.ram ~at:i in
       if char <> 0
       then (
         Buffer.add_int8 buf char;
@@ -18,7 +22,5 @@ let write t ~port ~value =
     in
     loop (value + 1);
     print_endline (Buffer.contents buf)
-  (* System/state *)
-  | 0x0f -> if value <> 0 then exit (value land 0x7f)
   | _ -> ()
 ;;

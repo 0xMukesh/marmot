@@ -1,4 +1,0 @@
-(executable
- (public_name marmot)
- (name main)
- (libraries uxn))

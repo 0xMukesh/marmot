@@ -16,26 +16,26 @@ let unwrap_mask mask mem =
   | None -> mem.mask
 ;;
 
-let read_byte ?mask mem loc = mem.data.(loc land unwrap_mask mask mem)
+let read_byte ?mask mem ~at = mem.data.(at land unwrap_mask mask mem)
 
-let read_short ?mask mem loc =
-  Utils.read_short (read_byte ?mask mem loc) (read_byte ?mask mem (loc + 1))
+let read_short ?mask mem ~at =
+  Utils.read_short (read_byte ?mask mem ~at) (read_byte ?mask mem ~at:(at + 1))
 ;;
 
-let read ?mask mem loc ~short =
-  if short then read_short ?mask mem loc else read_byte ?mask mem loc
+let read ?mask mem ~at ~short =
+  if short then read_short ?mask mem ~at else read_byte ?mask mem ~at
 ;;
 
-let write_byte ?mask mem loc ~value =
-  mem.data.(loc land unwrap_mask mask mem) <- value land 0xff
+let write_byte ?mask mem ~at ~value =
+  mem.data.(at land unwrap_mask mask mem) <- value land 0xff
 ;;
 
-let write_short ?mask mem loc ~value =
+let write_short ?mask mem ~at ~value =
   let hi, lo = Utils.split_short value in
-  write_byte ?mask mem loc ~value:hi;
-  write_byte ?mask mem (loc + 1) ~value:lo
+  write_byte ?mask mem ~at ~value:hi;
+  write_byte ?mask mem ~at:(at + 1) ~value:lo
 ;;
 
-let write ?mask mem loc ~value ~short =
-  if short then write_short ?mask mem loc ~value else write_byte ?mask mem loc ~value
+let write ?mask mem ~at ~value ~short =
+  if short then write_short ?mask mem ~at ~value else write_byte ?mask mem ~at ~value
 ;;

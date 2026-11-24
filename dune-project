@@ -23,6 +23,8 @@
   ocaml
   ocaml-lsp-server
   ocamlformat
-  ppx_deriving)
+  ppx_deriving
+  core-unix
+  raylib)
  (tags
   ("uxn", "varvara")))

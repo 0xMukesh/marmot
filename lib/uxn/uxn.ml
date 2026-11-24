@@ -15,10 +15,13 @@ module type S = sig
     | Break
 
   val make : unit -> machine
+  val set_pc : machine -> int -> unit
   val device : machine -> device
-  val check_halt : machine -> unit
+  val ports : machine -> Memory.t
+  val read_port : machine -> port:int -> short:bool -> int
+  val write_port : machine -> port:int -> value:int -> short:bool -> unit
   val load_program : machine -> int array -> unit
-  val write_to_port : machine -> port:int -> value:int -> unit
+  val check_halt : machine -> unit
   val step : machine -> step_result
 end
 
@@ -49,19 +52,21 @@ module Make (D : Device) : S with type device = D.t = struct
     }
   ;;
 
+  let set_pc m pc = m.pc <- pc
   let device m = m.device
+  let ports m = m.ports
+  let read_port m ~port ~short = Memory.read m.ports ~at:port ~short
+  let write_port m ~port ~value ~short = Memory.write m.ports ~at:port ~value ~short
+
+  let load_program m program =
+    set_pc m 0x100;
+    Memory.load m.memory program ~at:0x100
+  ;;
 
   let check_halt m =
     let value = Memory.read_byte m.ports ~at:0x0f in
     if value <> 0 then exit (value land 0x7f)
   ;;
-
-  let load_program m program =
-    m.pc <- 0x100;
-    Memory.load m.memory program ~at:0x100
-  ;;
-
-  let write_to_port m ~port ~value = Memory.write_byte m.ports ~at:port ~value
 
   let step m =
     let byte = Memory.read_byte m.memory ~at:m.pc in

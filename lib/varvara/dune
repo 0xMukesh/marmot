@@ -1,7 +1,7 @@
 (library
  (name varvara)
  (wrapped false)
- (libraries core uxn)
+ (libraries marmot_core uxn)
  (modules_without_implementation device_intf)
  (preprocess
   (pps

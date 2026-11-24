@@ -5,18 +5,16 @@ description: "An emulator for Uxn, written in OCaml"
 maintainer: ["Mukesh <mukesh@0xc84.fyi>"]
 authors: ["Mukesh <mukesh@0xc84.fyi>"]
 license: "MIT"
-tags: ["uxn" "," "varvara"]
+tags: ["uxn," "varvara," "emulators"]
 homepage: "https://github.com/0xmukesh/marmot"
 doc: "https://github.com/0xmukesh/marmot"
 bug-reports: "https://github.com/0xmukesh/marmot/issues"
 depends: [
   "dune" {>= "3.24"}
   "ocaml"
-  "ocaml-lsp-server"
-  "ocamlformat"
-  "ppx_deriving"
   "core_unix"
   "raylib"
+  "ppx_deriving"
   "odoc" {with-doc}
 ]
 build: [

@@ -21,10 +21,8 @@
  (description "An emulator for Uxn, written in OCaml")
  (depends
   ocaml
-  ocaml-lsp-server
-  ocamlformat
-  ppx_deriving
-  core-unix
-  raylib)
+  core_unix
+  raylib
+  ppx_deriving)
  (tags
-  ("uxn", "varvara")))
+  (uxn, varvara, emulators)))
